@@ -10,6 +10,19 @@ from flask import (
     render_template,
 )
 
+from pathlib import Path
+
+import mimetypes
+import os
+
+from pulumi import export, FileAsset, ResourceOptions, Config, Output
+import pulumi_aws
+import pulumi_aws.acm
+import pulumi_aws.cloudfront
+import pulumi_aws.config
+import pulumi_aws.route53
+import pulumi_aws.s3
+
 import pulumi
 import pulumi.automation as auto
 from pulumi_aws import s3
@@ -19,18 +32,55 @@ bp = Blueprint("sites", __name__, url_prefix="/sites")
 def create_pulumi_program(content: str):
     # Create a bucket and expose a website index document
     site_bucket = s3.Bucket(
-        "s3-website-bucket", website=s3.BucketWebsiteArgs(index_document="index.html")
+        "s3-website-bucket", 
+        website=s3.BucketWebsiteArgs(
+            index_document="index.html"
+            )
     )
     index_content = content
 
+    def crawl_directory(content_dir, f):
+        """
+        Crawl `content_dir` (including subdirectories) and apply the function `f` to each file.
+        """
+        for file in os.listdir(content_dir):
+            filepath = os.path.join(content_dir, file)
+
+            if os.path.isdir(filepath):
+                crawl_directory(filepath, f)
+            elif os.path.isfile(filepath):
+                f(filepath)
+    
+    web_contents_root_path = os.path.join(os.getcwd(), Path('C:', '/', 'Users', 'user', 'insuarence', 'build'))
+
+    def bucket_object_converter(filepath):
+        """
+        Takes a file path and returns an bucket object managed by Pulumi
+        """
+        relative_path = filepath.replace(web_contents_root_path + '/', '')
+        # Determine the mimetype using the `mimetypes` module.
+        mime_type, _ = mimetypes.guess_type(filepath)
+        content_file = pulumi_aws.s3.BucketObject(
+            relative_path,
+            key=relative_path,
+            acl='public-read',
+            bucket=site_bucket.id,
+            content_type=mime_type,
+            source=FileAsset(filepath),
+            opts=ResourceOptions(parent=site_bucket)
+        )
+    
+    # Crawl the web content root path and convert the file paths to S3 object resources.
+    crawl_directory(web_contents_root_path, bucket_object_converter)
+
     # Write our index.html into the site bucket
-    s3.BucketObject(
-        "index",
-        bucket=site_bucket.id,
-        content=index_content,
-        key="index.html",
-        content_type="text/html; charset=utf-8",
-    )
+    # s3.BucketObject(
+    #     "index",
+    #     bucket=site_bucket.id,
+    #     content=index_content,
+    #     key="index.html",
+    #     content_type="text/html; charset=utf-8",
+    # )
 
     # Set the access policy for the bucket so all objects are readable
     s3.BucketPolicy(
