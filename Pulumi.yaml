@@ -1,0 +1,6 @@
+name: meri
+runtime:
+  name: python
+  options:
+    virtualenv: venv
+description: A simple vercel clone
